@@ -4,14 +4,12 @@
 #include <openssl/sha.h>
 
 
-#define SHA256_DIGEST_HEX_LENGTH (SHA256_DIGEST_LENGTH * 2)
-#define HMAC_DIGEST_MAX_HEX_LENGTH (EVP_MAX_MD_SIZE * 2)
+#define SHA256_DIGEST_HEX_LENGTH    (SHA256_DIGEST_LENGTH * 2)
+#define HMAC_DIGEST_MAX_HEX_LENGTH  (EVP_MAX_MD_SIZE * 2)
 
-#define AMZ_DATE_MAX_LEN (sizeof("YYYYmmddTHHMMSSZ"))
+#define AMZ_DATE_MAX_LEN            (sizeof("YYYYmmdd"))
+#define AMZ_DATE_TIME_MAX_LEN       (sizeof("YYYYmmddTHHMMSSZ"))
 
-
-static char *ngx_conf_set_base64_str_slot(ngx_conf_t *cf, ngx_command_t *cmd,
-    void *conf);
 
 static char *ngx_http_aws_auth_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf);
@@ -21,8 +19,16 @@ static ngx_int_t ngx_http_aws_auth_preconfiguration(ngx_conf_t *cf);
 
 typedef struct {
     ngx_str_t  access_key;
+    ngx_str_t  secret_key;
+    ngx_str_t  service;
+    ngx_str_t  region;
+
+    ngx_str_t  secret_key_prefix;
+    ngx_str_t  signing_key_date;
     ngx_str_t  signing_key;
     ngx_str_t  key_scope;
+    ngx_str_t  key_scope_suffix;
+
     unsigned   ignore:1;
 } ngx_http_aws_auth_ctx_t;
 
@@ -47,6 +53,12 @@ static ngx_str_t  ngx_http_aws_auth_content_sha_header =
 
 static ngx_str_t  ngx_http_aws_auth_date_header =
     ngx_string("x-amz-date");
+
+static ngx_str_t  ngx_http_aws_auth_aws4_request =
+    ngx_string("aws4_request");
+
+static ngx_str_t  ngx_http_aws_auth_aws4 =
+    ngx_string("AWS4");
 
 
 static ngx_command_t  ngx_http_aws_auth_commands[] = {
@@ -101,18 +113,25 @@ static ngx_command_t  ngx_http_aws_auth_block_commands[] = {
       offsetof(ngx_http_aws_auth_ctx_t, access_key),
       NULL },
 
-    { ngx_string("signing_key"),
-      NGX_CONF_TAKE1,
-      ngx_conf_set_base64_str_slot,
-      0,
-      offsetof(ngx_http_aws_auth_ctx_t, signing_key),
-      NULL },
-
-    { ngx_string("key_scope"),
+    { ngx_string("secret_key"),
       NGX_CONF_TAKE1,
       ngx_conf_set_str_slot,
       0,
-      offsetof(ngx_http_aws_auth_ctx_t, key_scope),
+      offsetof(ngx_http_aws_auth_ctx_t, secret_key),
+      NULL },
+
+    { ngx_string("service"),
+      NGX_CONF_TAKE1,
+      ngx_conf_set_str_slot,
+      0,
+      offsetof(ngx_http_aws_auth_ctx_t, service),
+      NULL },
+
+    { ngx_string("region"),
+      NGX_CONF_TAKE1,
+      ngx_conf_set_str_slot,
+      0,
+      offsetof(ngx_http_aws_auth_ctx_t, region),
       NULL },
 
     ngx_null_command
@@ -131,41 +150,6 @@ static ngx_uint_t  argument_number[] = {
 };
 
 
-static char *
-ngx_conf_set_base64_str_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
-{
-    char  *p = conf;
-
-    ngx_str_t        *field, *value;
-    ngx_conf_post_t  *post;
-
-    field = (ngx_str_t *)(p + cmd->offset);
-
-    if (field->data) {
-        return "is duplicate";
-    }
-
-    value = cf->args->elts;
-
-    field->data = ngx_palloc(cf->pool,
-        ngx_base64_decoded_length(value[1].len));
-    if (field->data == NULL) {
-        return NGX_CONF_ERROR;
-    }
-
-    if (ngx_decode_base64(field, &value[1]) != NGX_OK) {
-        return "is not valid base64";
-    }
-
-    if (cmd->post) {
-        post = cmd->post;
-        return post->post_handler(cf, post, field);
-    }
-
-    return NGX_CONF_OK;
-}
-
-
 static void
 ngx_http_aws_auth_sha256_hex(ngx_str_t *message, u_char *digest)
 {
@@ -181,10 +165,9 @@ ngx_http_aws_auth_sha256_hex(ngx_str_t *message, u_char *digest)
 
 
 static ngx_int_t
-ngx_http_aws_auth_hmac_sha256_hex(ngx_http_request_t *r, ngx_str_t *key,
+ngx_http_aws_auth_hmac_sha256(ngx_http_request_t *r, ngx_str_t *key,
     ngx_str_t *message, ngx_str_t *dest)
 {
-    u_char     hash[EVP_MAX_MD_SIZE];
     unsigned   hash_len;
 #if (OPENSSL_VERSION_NUMBER < 0x10100000L)
     HMAC_CTX   hmac_buf;
@@ -204,37 +187,55 @@ ngx_http_aws_auth_hmac_sha256_hex(ngx_http_request_t *r, ngx_str_t *key,
 #endif
     HMAC_Init_ex(hmac, key->data, key->len, EVP_sha256(), NULL);
     HMAC_Update(hmac, message->data, message->len);
-    HMAC_Final(hmac, hash, &hash_len);
+    HMAC_Final(hmac, dest->data, &hash_len);
 #if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
     HMAC_CTX_free(hmac);
 #else
     HMAC_CTX_cleanup(hmac);
 #endif
 
-    dest->len = ngx_hex_dump(dest->data, hash, hash_len) - dest->data;
+    dest->len = hash_len;
 
+    return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_aws_auth_hmac_sha256_hex(ngx_http_request_t *r, ngx_str_t *key,
+    ngx_str_t *message, ngx_str_t *dest)
+{
+    u_char     hash_buf[EVP_MAX_MD_SIZE];
+    ngx_str_t  hash;
+
+    hash.data = hash_buf;
+
+    if (ngx_http_aws_auth_hmac_sha256(r, key, message, &hash) != NGX_OK) {
+        return NGX_ERROR;
+    }
+
+    dest->len = ngx_hex_dump(dest->data, hash.data, hash.len) - dest->data;
     return NGX_OK;
 }
 
 
 static ngx_int_t
-ngx_http_aws_auth_date(
+ngx_http_aws_auth_date_time(
     ngx_http_request_t *r,
     ngx_http_variable_value_t *v,
     uintptr_t data)
 {
     struct tm  tm;
 
-    v->data = ngx_pnalloc(r->pool, AMZ_DATE_MAX_LEN);
+    v->data = ngx_pnalloc(r->pool, AMZ_DATE_TIME_MAX_LEN);
     if (v->data == NULL) {
         return NGX_ERROR;
     }
 
     ngx_libc_gmtime(ngx_time(), &tm);
-    v->len = strftime((char*)v->data, AMZ_DATE_MAX_LEN, "%Y%m%dT%H%M%SZ", &tm);
+    v->len = strftime((char*)v->data, AMZ_DATE_TIME_MAX_LEN, "%Y%m%dT%H%M%SZ",
+        &tm);
     if (v->len == 0) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-            "ngx_http_aws_auth_date: strftime failed");
+            "ngx_http_aws_auth_date_time: strftime failed");
         return NGX_ERROR;
     }
 
@@ -358,7 +359,7 @@ ngx_http_aws_auth_get_signed_headers(ngx_http_request_t *r, ngx_buf_t *request,
     return NGX_OK;
 }
 
-ngx_int_t
+static ngx_int_t
 ngx_http_aws_auth_canonical_request(ngx_http_request_t *r,
     ngx_http_aws_auth_ctx_t *ctx, ngx_str_t *signed_headers, ngx_str_t *date,
     ngx_str_t *result)
@@ -494,6 +495,7 @@ ngx_http_aws_auth_canonical_request(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
+    p = result->data;
     p = ngx_copy(p, method.data, method.len);
     *p++ = LF;
     p = ngx_copy(p, u->uri.data, u->uri.len);
@@ -512,6 +514,74 @@ ngx_http_aws_auth_canonical_request(ngx_http_request_t *r,
     p = ngx_copy(p, content_sha.data, content_sha.len);
 
     result->len = p - result->data;
+
+    return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_aws_auth_generate_signing_key(ngx_http_request_t *r,
+    ngx_http_aws_auth_ctx_t  *ctx)
+{
+    u_char     *p;
+    u_char      date_buf[AMZ_DATE_MAX_LEN];
+    struct tm   tm;
+    ngx_str_t   date;
+    ngx_str_t  *signing_key;
+
+    /* get the GMT date */
+    ngx_libc_gmtime(ngx_time(), &tm);
+    date.len = strftime((char*)date_buf, sizeof(date_buf), "%Y%m%d", &tm);
+    if (date.len == 0) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "ngx_http_aws_auth_generate_signing_key: strftime failed");
+        return NGX_ERROR;
+    }
+    date.data = date_buf;
+
+    /* check whether date changed since last time */
+    if (ctx->signing_key_date.len == date.len &&
+        ngx_memcmp(date.data, ctx->signing_key_date.data, date.len) == 0)
+    {
+        return NGX_OK;
+    }
+
+    /* generate a key */
+    ctx->signing_key_date.len = 0;
+
+    signing_key = &ctx->signing_key;
+
+    if (ngx_http_aws_auth_hmac_sha256(r, &ctx->secret_key_prefix, &date,
+        signing_key) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    if (ngx_http_aws_auth_hmac_sha256(r, signing_key, &ctx->region,
+        signing_key) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    if (ngx_http_aws_auth_hmac_sha256(r, signing_key, &ctx->service,
+        signing_key) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    if (ngx_http_aws_auth_hmac_sha256(r, signing_key,
+        &ngx_http_aws_auth_aws4_request, signing_key) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    /* save the date and key scope */
+    ctx->signing_key_date.len = date.len;
+    ngx_memcpy(ctx->signing_key_date.data, date.data, date.len);
+
+    p = ngx_copy(ctx->key_scope.data, ctx->signing_key_date.data,
+        ctx->signing_key_date.len);
+    p = ngx_copy(p, ctx->key_scope_suffix.data, ctx->key_scope_suffix.len);
+    ctx->key_scope.len = p - ctx->key_scope.data;
 
     return NGX_OK;
 }
@@ -568,6 +638,11 @@ ngx_http_aws_auth_variable(ngx_http_request_t *r, ngx_http_variable_value_t *v,
 
     canonical_sha256.data = canonical_sha256_buf;
     canonical_sha256.len = sizeof(canonical_sha256_buf);
+
+    /* generate signing key */
+    if (ngx_http_aws_auth_generate_signing_key(r, ctx) != NGX_OK) {
+        return NGX_ERROR;
+    }
 
     /* string to sign */
     string_to_sign.data = ngx_pnalloc(r->pool,
@@ -709,6 +784,56 @@ invalid:
     return NGX_CONF_ERROR;
 }
 
+static char *
+ngx_http_aws_auth_init_ctx(ngx_conf_t *cf, ngx_http_aws_auth_ctx_t *ctx)
+{
+    u_char *p;
+
+    /* add prefix to secret key */
+    ctx->secret_key_prefix.data = ngx_pnalloc(cf->pool,
+        ngx_http_aws_auth_aws4.len + ctx->secret_key.len);
+    if (ctx->secret_key_prefix.data == NULL) {
+        return NGX_CONF_ERROR;
+    }
+    p = ctx->secret_key_prefix.data;
+    p = ngx_copy(p, ngx_http_aws_auth_aws4.data, ngx_http_aws_auth_aws4.len);
+    p = ngx_copy(p, ctx->secret_key.data, ctx->secret_key.len);
+    ctx->secret_key_prefix.len = p - ctx->secret_key_prefix.data;
+
+    /* init key scope suffix */
+    ctx->key_scope_suffix.data = ngx_pnalloc(cf->pool, ctx->region.len +
+        ctx->service.len + ngx_http_aws_auth_aws4_request.len + 3);
+    if (ctx->key_scope_suffix.data == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    p = ctx->key_scope_suffix.data;
+    *p++ = '/';
+    p = ngx_copy(p, ctx->region.data, ctx->region.len);
+    *p++ = '/';
+    p = ngx_copy(p, ctx->service.data, ctx->service.len);
+    *p++ = '/';
+    p = ngx_copy(p, ngx_http_aws_auth_aws4_request.data,
+        ngx_http_aws_auth_aws4_request.len);
+    ctx->key_scope_suffix.len = p - ctx->key_scope_suffix.data;
+
+    /* alloc additional buffers */
+    p = ngx_pnalloc(cf->pool, AMZ_DATE_MAX_LEN + EVP_MAX_MD_SIZE +
+        AMZ_DATE_MAX_LEN + ctx->key_scope_suffix.len);
+    if (p == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    ctx->signing_key_date.data = p;
+    p += AMZ_DATE_MAX_LEN;
+
+    ctx->signing_key.data = p;
+    p += EVP_MAX_MD_SIZE;
+
+    ctx->key_scope.data = p;
+
+    return NGX_CONF_OK;
+}
 
 static char *
 ngx_http_aws_auth_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
@@ -775,19 +900,25 @@ ngx_http_aws_auth_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_ERROR;
     }
 
-    if (ctx->signing_key.len == 0) {
+    if (ctx->secret_key.len == 0) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-            "signing_key not set in aws_auth block");
+            "secret_key not set in aws_auth block");
         return NGX_CONF_ERROR;
     }
 
-    if (ctx->key_scope.len == 0) {
+    if (ctx->service.len == 0) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-            "key_scope not set in aws_auth block");
+            "service not set in aws_auth block");
         return NGX_CONF_ERROR;
     }
 
-    return NGX_CONF_OK;
+    if (ctx->region.len == 0) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "region not set in aws_auth block");
+        return NGX_CONF_ERROR;
+    }
+
+    return ngx_http_aws_auth_init_ctx(cf, ctx);
 }
 
 
@@ -801,7 +932,7 @@ ngx_http_aws_auth_preconfiguration(ngx_conf_t *cf)
         return NGX_ERROR;
     }
 
-    var->get_handler = ngx_http_aws_auth_date;
+    var->get_handler = ngx_http_aws_auth_date_time;
 
     return NGX_OK;
 }

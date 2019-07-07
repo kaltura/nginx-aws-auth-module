@@ -60,20 +60,26 @@ Creates a new variable that evaluates to the `Authorization` header for AWS auth
 
 Sets the AWS access key, e.g. AKIAIOSFODNN7EXAMPLE.
 
-#### signing_key
-* **syntax**: `signing_key key`
+#### secret_key
+* **syntax**: `secret_key key`
 * **default**: `none`
 * **context**: `aws_auth`
 
-Sets the AWS signing key, base64 encoded, e.g. mEcBSVtt6D+SgP1qI824NXhP1LKbCEct+HBqQnPWyJQ=.
-Use the provided generate_temp_token.py script to generate a temporary signing key using STS.
+Sets the AWS secret key, e.g. wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY.
 
-#### key_scope
-* **syntax**: `key_scope key`
+#### service
+* **syntax**: `service srv`
 * **default**: `none`
 * **context**: `aws_auth`
 
-Sets the AWS key scope, e.g. 20130606/us-east-1/s3/aws4_request.
+Sets the AWS service, e.g. s3.
+
+#### region
+* **syntax**: `region reg`
+* **default**: `none`
+* **context**: `aws_auth`
+
+Sets the AWS region, e.g. us-east-1.
 
 ## Nginx variables
 

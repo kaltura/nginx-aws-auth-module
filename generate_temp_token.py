@@ -1,22 +1,6 @@
-import hashlib
-import base64
 import boto3
-import hmac
-import time
 import sys
 import os
-
-
-def hmac_sha256(key, msg):
-    return hmac.new(key, msg, hashlib.sha256).digest()
-
-def get_signing_key(secret_key, date, region, service):
-    result = hmac_sha256('AWS4' + secret_key, date)
-    result = hmac_sha256(result, region)
-    result = hmac_sha256(result, service)
-    result = hmac_sha256(result, 'aws4_request')
-    return result
-
 
 if __name__ == '__main__':
 
@@ -37,22 +21,14 @@ if __name__ == '__main__':
 
     credentials = assumed_role['Credentials']
 
-    access_key = credentials['AccessKeyId']
-    secret_key = credentials['SecretAccessKey']
-    session_token = credentials['SessionToken']
-
-    date = time.strftime('%Y%m%d', time.gmtime())
-
-    signing_key = get_signing_key(secret_key, date, region, service)
-    key_scope = '%s/%s/%s/aws4_request' % (date, region, service)
-
     print '''
     aws_auth $aws_token {
         access_key %s;
-        signing_key %s;
-        key_scope %s;
+        secret_key %s;
+        service %s;
+        region %s;
     }
-''' % (access_key, base64.b64encode(signing_key), key_scope)
+''' % (credentials['AccessKeyId'], credentials['SecretAccessKey'], service, region)
 
     print '''
         location /proxy/ {
@@ -62,4 +38,4 @@ if __name__ == '__main__':
             proxy_set_header X-Amz-Security-Token %s;
             proxy_set_header Authorization $aws_token;
         }
-''' % (region, session_token)
+''' % (region, credentials['SessionToken'])
