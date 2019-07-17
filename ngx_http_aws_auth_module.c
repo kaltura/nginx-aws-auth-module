@@ -883,7 +883,7 @@ ngx_http_aws_auth_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     cf->ctx = &conf_ctx;
     cf->handler = ngx_http_secure_token_command_handler;
-    cf->handler_conf = ctx;
+    cf->handler_conf = (void*)ctx;
 
     rv = ngx_conf_parse(cf, NULL);
 
