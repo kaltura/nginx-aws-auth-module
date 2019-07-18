@@ -7,8 +7,8 @@ compiler:
     - gcc
 dist: trusty
 env:
-  - NGX_VOD_MODULE=--add-module=./
-  - NGX_VOD_MODULE=--add-dynamic-module=./
+  - NGX_VOD_MODULE=--add-module=./nginx-aws-auth-module
+  - NGX_VOD_MODULE=--add-dynamic-module=./nginx-aws-auth-module
 script: ./travis_build.sh $NGX_VOD_MODULE
 notifications:
   email:
