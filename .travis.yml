@@ -1,0 +1,19 @@
+before_install:
+    - sudo apt-get update -qq
+    - sudo apt-get install -y libssl-dev libpcre3-dev wget unzip 
+language: c
+compiler:
+    - clang
+    - gcc
+dist: trusty
+env:
+  - NGX_VOD_MODULE=--add-module=./
+  - NGX_VOD_MODULE=--add-dynamic-module=./
+script: ./travis_build.sh $NGX_VOD_MODULE
+notifications:
+  email:
+    recipients:
+      - eran.kornblau@kaltura.com
+      - jess.portnoy@kaltura.com
+    on_success: change
+    on_failure: always
