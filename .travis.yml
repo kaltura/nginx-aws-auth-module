@@ -7,9 +7,9 @@ compiler:
     - gcc
 dist: trusty
 env:
-  - NGX_AWS_MODULE=--add-module=~/kaltura/nginx-aws-auth-module
-  - NGX_AWS_MODULE=--add-dynamic-module=~/kaltura/nginx-aws-auth-module
-script: ./travis_build.sh $NGX_AWS_MODULE
+  - NGX_AWS_MODULE=--add-module=$TRAVIS_BUILD_DIR
+  - NGX_AWS_MODULE=--add-dynamic-module=$TRAVIS_BUILD_DIR
+script: echo $TRAVIS_BUILD_DIR && ./travis_build.sh $NGX_AWS_MODULE
 notifications:
   email:
     recipients:
