@@ -10,7 +10,7 @@ env:
   - NGX_AWS_MODULE=--add-module=$TRAVIS_BUILD_DIR
   - NGX_AWS_MODULE=--add-dynamic-module=$TRAVIS_BUILD_DIR
 script: echo $TRAVIS_BUILD_DIR && ./travis_build.sh $NGX_AWS_MODULE
-after_script: ldd /usr/lib64/nginx/modules/ngx_http_aws_auth_module.so
+after_script: ldd /usr/lib64/nginx/modules/ngx_http_aws_auth_module.so || true
 notifications:
   email:
     recipients:
