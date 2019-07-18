@@ -51,4 +51,4 @@ cd nginx-$NGINX_VERSION
         --with-threads \
         --with-cc-opt="-O3" \
         $*
-make && make install
+make && sudo make install
