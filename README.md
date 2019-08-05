@@ -25,8 +25,9 @@ http {
 
     aws_auth $aws_token {
         access_key AKIAIOSFODNN7EXAMPLE;
-        signing_key mEcBSVtt6D+SgP1qI824NXhP1LKbCEct+HBqQnPWyJQ=;
-        key_scope 20130606/us-east-1/s3/aws4_request;
+        secret_key wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY;
+        service s3;
+        region us-east-1;
     }
 
     server {
