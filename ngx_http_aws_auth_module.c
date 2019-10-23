@@ -2,7 +2,7 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 #include <openssl/sha.h>
-
+#include <openssl/hmac.h>
 
 #define SHA256_DIGEST_HEX_LENGTH    (SHA256_DIGEST_LENGTH * 2)
 #define HMAC_DIGEST_MAX_HEX_LENGTH  (EVP_MAX_MD_SIZE * 2)
@@ -360,18 +360,117 @@ ngx_http_aws_auth_get_signed_headers(ngx_http_request_t *r, ngx_buf_t *request,
 }
 
 static ngx_int_t
+ngx_http_aws_auth_get_canonical_querystring(ngx_http_request_t *r, u_char *qs, ngx_int_t qs_len, ngx_str_t *querystring) {
+    ngx_keyval_t    *h;
+    ngx_keyval_t    *last;
+    u_char          *e, *ke;
+    ngx_array_t     *elems;
+    ngx_int_t       s = 0;
+
+    elems = ngx_array_create(r->pool, 5, sizeof(*h));
+
+    for (;;) {
+        /* Abort and skip invalid requests */
+        if (qs_len <= 0) {
+            break;
+        }
+
+        /* Skip "reserved" characters in the beginning of the string */
+        if (*qs == '&' || *qs == '=' || *qs == '?') {
+            qs++;
+            qs_len--;
+            continue;
+        }
+
+        /* Find next & to get end of key/value */
+        e = ngx_strlchr(qs, qs + qs_len, '&');
+        
+        /* If there are no more parts then point e to last character of query */
+        if (e == NULL) {
+            e = qs + qs_len;
+        }
+
+        /* Construct element */
+        h = ngx_array_push(elems);
+
+        /* Find = to get end of key */
+        ke = ngx_strlchr(qs, e, '=');
+        h->key.len = ke == NULL ? e - qs : ke - qs;
+        
+        h->key.data = ngx_palloc(r->pool, h->key.len);
+        ngx_memcpy(h->key.data, qs, h->key.len);
+        
+        s += h->key.len; /* key length + length of = */
+
+        if (ke != NULL) {
+            h->value.len = e - ke - 1;
+            h->value.data = ngx_palloc(r->pool, h->value.len);
+            ngx_memcpy(h->value.data, ke + 1, h->value.len);
+
+            s += h->value.len;
+        } else {
+            h->value.len = 0;
+        }
+
+        /* Move start of qs */
+        qs += h->key.len + h->value.len + 1;
+        qs_len -= h->key.len + h->value.len + 1;
+
+        /* Add one for = */
+        s++;
+
+        /* Add one for & if we're passed first elem */
+        if (elems->nelts > 1) {
+            s++;
+        }
+
+    }
+
+    ngx_qsort(elems->elts, elems->nelts, sizeof(ngx_keyval_t),
+        ngx_http_aws_auth_compare_keyvals);
+
+    querystring->data = (u_char *) ngx_palloc(r->pool, s);
+    querystring->len = s;
+
+    last = (ngx_keyval_t*)elems->elts + elems->nelts;
+
+    e = querystring->data;
+              
+    for (h = elems->elts; h < last; h++) {                  
+        if (h != elems->elts) {
+            *e++ = '&';
+        }
+    
+        ngx_memcpy(e, h->key.data, h->key.len);
+        e += h->key.len;
+        *e++ = '=';
+        
+        if (h->value.len > 0) {
+            ngx_memcpy(e, h->value.data, h->value.len);
+            e += h->value.len;
+        }
+    }
+    
+    return NGX_OK;
+}
+
+static ngx_int_t
 ngx_http_aws_auth_canonical_request(ngx_http_request_t *r,
     ngx_http_aws_auth_ctx_t *ctx, ngx_str_t *signed_headers, ngx_str_t *date,
     ngx_str_t *result)
 {
     u_char               *p;
     u_char               *pos;
+    u_char               *qs;
     size_t                alloc_size;
+    ngx_int_t             canon_uri_len;
+    ngx_int_t             qs_len;
     ngx_int_t             rc;
     ngx_buf_t            *request;
     ngx_str_t             method;
     ngx_str_t             content_sha;
     ngx_array_t           headers;
+    ngx_str_t             querystring;
     ngx_keyval_t         *h;
     ngx_keyval_t         *last;
     ngx_http_upstream_t  *u;
@@ -421,11 +520,25 @@ ngx_http_aws_auth_canonical_request(ngx_http_request_t *r,
     method.len = pos - method.data;
 
     /* get the uri */
-    if (ngx_strlchr(u->uri.data, u->uri.data + u->uri.len, '?') != NULL) {
+    qs = ngx_strlchr(u->uri.data, u->uri.data + u->uri.len, '?');
+    if (qs == NULL) {
+        canon_uri_len = u->uri.len;
+        qs_len = 0;
+        querystring.data = NULL;
+        querystring.len = 0;        
+    } else {
+        canon_uri_len = qs - u->uri.data;
+        qs_len = u->uri.len - canon_uri_len - 1;
+        /* Get query string */
+        ngx_http_aws_auth_get_canonical_querystring(r, qs + 1, qs_len, &querystring);
+    }
+
+    // Disable because we want to support queries
+    /*if (ngx_strlchr(u->uri.data, u->uri.data + u->uri.len, '?') != NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "ngx_http_aws_auth_canonical_request: query args not supported");
         return NGX_ERROR;
-    }
+    }*/
 
     /* skip the request line */
     request->pos = ngx_strlchr(request->pos, request->last, LF);
@@ -487,7 +600,7 @@ ngx_http_aws_auth_canonical_request(ngx_http_request_t *r,
     }
 
     /* canonical request */
-    alloc_size += method.len + u->uri.len + signed_headers->len +
+    alloc_size += method.len + u->uri.len + signed_headers->len + querystring.len +
         content_sha.len + 5;  /* 5 = LFs */
 
     result->data = ngx_pnalloc(r->pool, alloc_size);
@@ -498,8 +611,9 @@ ngx_http_aws_auth_canonical_request(ngx_http_request_t *r,
     p = result->data;
     p = ngx_copy(p, method.data, method.len);
     *p++ = LF;
-    p = ngx_copy(p, u->uri.data, u->uri.len);
+    p = ngx_copy(p, u->uri.data, canon_uri_len);
     *p++ = LF;
+    p = ngx_copy(p, querystring.data, querystring.len);
     *p++ = LF;  /* no query params */
 
     for (h = headers.elts; h < last; h++) {
