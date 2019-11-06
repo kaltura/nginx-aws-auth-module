@@ -695,7 +695,7 @@ ngx_http_aws_auth_variable(ngx_http_request_t *r, ngx_http_variable_value_t *v,
 
 /* copied from ngx_conf_handler, removed support for modules */
 static char *
-ngx_http_secure_token_command_handler(ngx_conf_t *cf, ngx_command_t *dummy,
+ngx_http_aws_auth_command_handler(ngx_conf_t *cf, ngx_command_t *dummy,
     void *conf)
 {
     ngx_http_aws_auth_conf_ctx_t  *ctx;
@@ -867,7 +867,7 @@ ngx_http_aws_auth_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     }
 
     /* add the variable */
-    var = ngx_http_add_variable(cf, &name, 0);
+    var = ngx_http_add_variable(cf, &name, NGX_HTTP_VAR_NOCACHEABLE);
     if (var == NULL) {
         return NGX_CONF_ERROR;
     }
@@ -882,7 +882,7 @@ ngx_http_aws_auth_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     save = *cf;
 
     cf->ctx = &conf_ctx;
-    cf->handler = ngx_http_secure_token_command_handler;
+    cf->handler = ngx_http_aws_auth_command_handler;
     cf->handler_conf = (void*)ctx;
 
     rv = ngx_conf_parse(cf, NULL);
