@@ -533,13 +533,6 @@ ngx_http_aws_auth_canonical_request(ngx_http_request_t *r,
         ngx_http_aws_auth_get_canonical_querystring(r, qs + 1, qs_len, &querystring);
     }
 
-    // Disable because we want to support queries
-    /*if (ngx_strlchr(u->uri.data, u->uri.data + u->uri.len, '?') != NULL) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-            "ngx_http_aws_auth_canonical_request: query args not supported");
-        return NGX_ERROR;
-    }*/
-
     /* skip the request line */
     request->pos = ngx_strlchr(request->pos, request->last, LF);
     if (request->pos == NULL) {
