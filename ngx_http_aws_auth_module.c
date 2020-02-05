@@ -60,6 +60,8 @@ static ngx_str_t  ngx_http_aws_auth_aws4_request =
 static ngx_str_t  ngx_http_aws_auth_aws4 =
     ngx_string("AWS4");
 
+static ngx_str_t ngx_http_aws_auth_range =
+    ngx_string("range");
 
 static ngx_command_t  ngx_http_aws_auth_commands[] = {
 
@@ -309,6 +311,12 @@ ngx_http_aws_auth_get_signed_headers(ngx_http_request_t *r, ngx_buf_t *request,
         key.len = r->header_name_end - r->header_name_start;
 
         required = 0;
+         if (key.len == ngx_http_aws_auth_range.len &&
+            ngx_strncasecmp(key.data, ngx_http_aws_auth_range.data,
+                ngx_http_aws_auth_range.len) == 0)
+        {
+            required = 1;
+        }
 
         if (key.len == ngx_http_aws_auth_host.len &&
             ngx_strncasecmp(key.data, ngx_http_aws_auth_host.data,
