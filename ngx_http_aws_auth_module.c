@@ -2,6 +2,7 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 #include <openssl/sha.h>
+#include <openssl/hmac.h>
 
 
 #define SHA256_DIGEST_HEX_LENGTH    (SHA256_DIGEST_LENGTH * 2)
