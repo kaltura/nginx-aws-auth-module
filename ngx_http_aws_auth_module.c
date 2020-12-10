@@ -360,6 +360,72 @@ ngx_http_aws_auth_get_signed_headers(ngx_http_request_t *r, ngx_buf_t *request,
     return NGX_OK;
 }
 
+
+/* Note: copied from ngx_escape_uri:uri_component but without escaping '/' */
+
+static uintptr_t
+ngx_escape_uri_components(u_char *dst, u_char *src, size_t size)
+{
+    ngx_uint_t      n;
+    static u_char   hex[] = "0123456789ABCDEF";
+
+                    /* " ", "#", "%", "?", %00-%1F, %7F-%FF */
+
+                    /* not ALPHA, DIGIT, "-", ".", "_", "~" */
+
+    static uint32_t   escape[] = {
+        0xffffffff, /* 1111 1111 1111 1111  1111 1111 1111 1111 */
+
+                    /* ?>=< ;:98 7654 3210  /.-, +*)( '&%$ #"!  */
+        0xfc001fff, /* 1111 1100 0000 0000  0001 1111 1111 1111 */
+
+                    /* _^]\ [ZYX WVUT SRQP  ONML KJIH GFED CBA@ */
+        0x78000001, /* 0111 1000 0000 0000  0000 0000 0000 0001 */
+
+                    /*  ~}| {zyx wvut srqp  onml kjih gfed cba` */
+        0xb8000001, /* 1011 1000 0000 0000  0000 0000 0000 0001 */
+
+        0xffffffff, /* 1111 1111 1111 1111  1111 1111 1111 1111 */
+        0xffffffff, /* 1111 1111 1111 1111  1111 1111 1111 1111 */
+        0xffffffff, /* 1111 1111 1111 1111  1111 1111 1111 1111 */
+        0xffffffff  /* 1111 1111 1111 1111  1111 1111 1111 1111 */
+    };
+
+
+    if (dst == NULL) {
+
+        /* find the number of the characters to be escaped */
+
+        n = 0;
+
+        while (size) {
+            if (escape[*src >> 5] & (1U << (*src & 0x1f))) {
+                n++;
+            }
+            src++;
+            size--;
+        }
+
+        return (uintptr_t) n;
+    }
+
+    while (size) {
+        if (escape[*src >> 5] & (1U << (*src & 0x1f))) {
+            *dst++ = '%';
+            *dst++ = hex[*src >> 4];
+            *dst++ = hex[*src & 0xf];
+            src++;
+
+        } else {
+            *dst++ = *src++;
+        }
+        size--;
+    }
+
+    return (uintptr_t) dst;
+}
+
+
 static ngx_int_t
 ngx_http_aws_auth_canonical_request(ngx_http_request_t *r,
     ngx_http_aws_auth_ctx_t *ctx, ngx_str_t *signed_headers, ngx_str_t *date,
@@ -368,6 +434,7 @@ ngx_http_aws_auth_canonical_request(ngx_http_request_t *r,
     u_char               *p;
     u_char               *pos;
     size_t                alloc_size;
+    uintptr_t             escape;
     ngx_int_t             rc;
     ngx_buf_t            *request;
     ngx_str_t             method;
@@ -488,7 +555,9 @@ ngx_http_aws_auth_canonical_request(ngx_http_request_t *r,
     }
 
     /* canonical request */
-    alloc_size += method.len + u->uri.len + signed_headers->len +
+    escape = ngx_escape_uri_components(NULL, u->uri.data, u->uri.len);
+
+    alloc_size += method.len + u->uri.len + 2 * escape + signed_headers->len +
         content_sha.len + 5;  /* 5 = LFs */
 
     result->data = ngx_pnalloc(r->pool, alloc_size);
@@ -499,7 +568,14 @@ ngx_http_aws_auth_canonical_request(ngx_http_request_t *r,
     p = result->data;
     p = ngx_copy(p, method.data, method.len);
     *p++ = LF;
-    p = ngx_copy(p, u->uri.data, u->uri.len);
+
+    if (escape == 0) {
+        p = ngx_copy(p, u->uri.data, u->uri.len);
+
+    } else {
+        p = (u_char *) ngx_escape_uri_components(p, u->uri.data, u->uri.len);
+    }
+
     *p++ = LF;
     *p++ = LF;  /* no query params */
 
