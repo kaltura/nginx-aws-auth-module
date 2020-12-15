@@ -232,8 +232,8 @@ ngx_http_aws_auth_date_time(
     }
 
     ngx_libc_gmtime(ngx_time(), &tm);
-    v->len = strftime((char*)v->data, AMZ_DATE_TIME_MAX_LEN, "%Y%m%dT%H%M%SZ",
-        &tm);
+    v->len = strftime((char *) v->data, AMZ_DATE_TIME_MAX_LEN,
+        "%Y%m%dT%H%M%SZ", &tm);
     if (v->len == 0) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "ngx_http_aws_auth_date_time: strftime failed");
@@ -361,11 +361,11 @@ ngx_http_aws_auth_get_signed_headers(ngx_http_request_t *r, ngx_buf_t *request,
 }
 
 
-/* Note: copied from ngx_escape_uri:uri_component but without escaping '/' */
-
 static uintptr_t
-ngx_escape_uri_components(u_char *dst, u_char *src, size_t size)
+ngx_normalize_uri(u_char *dst, u_char *src, size_t size)
 {
+    u_char          ch;
+    ngx_int_t       num;
     ngx_uint_t      n;
     static u_char   hex[] = "0123456789ABCDEF";
 
@@ -410,16 +410,41 @@ ngx_escape_uri_components(u_char *dst, u_char *src, size_t size)
     }
 
     while (size) {
-        if (escape[*src >> 5] & (1U << (*src & 0x1f))) {
-            *dst++ = '%';
-            *dst++ = hex[*src >> 4];
-            *dst++ = hex[*src & 0xf];
+
+        switch (*src) {
+
+        case '+':
+            ch = ' ';
             src++;
+            size--;
+            break;
+
+        case '%':
+            if (size >= 3) {
+                num = ngx_hextoi(src + 1, 2);
+                if (num != NGX_ERROR) {
+                    ch = num;
+                    src += 3;
+                    size -= 3;
+                    break;
+                }
+            }
+
+            /* fall through */
+
+        default:
+            ch = *src++;
+            size--;
+        }
+
+        if (escape[ch >> 5] & (1U << (ch & 0x1f))) {
+            *dst++ = '%';
+            *dst++ = hex[ch >> 4];
+            *dst++ = hex[ch & 0xf];
 
         } else {
-            *dst++ = *src++;
+            *dst++ = ch;
         }
-        size--;
     }
 
     return (uintptr_t) dst;
@@ -527,7 +552,7 @@ ngx_http_aws_auth_canonical_request(ngx_http_request_t *r,
     ngx_qsort(headers.elts, headers.nelts, sizeof(ngx_keyval_t),
         ngx_http_aws_auth_compare_keyvals);
 
-    last = (ngx_keyval_t*)headers.elts + headers.nelts;
+    last = (ngx_keyval_t *) headers.elts + headers.nelts;
 
     signed_headers->len = 0;
     alloc_size = 0;
@@ -555,7 +580,7 @@ ngx_http_aws_auth_canonical_request(ngx_http_request_t *r,
     }
 
     /* canonical request */
-    escape = ngx_escape_uri_components(NULL, u->uri.data, u->uri.len);
+    escape = ngx_normalize_uri(NULL, u->uri.data, u->uri.len);
 
     alloc_size += method.len + u->uri.len + 2 * escape + signed_headers->len +
         content_sha.len + 5;  /* 5 = LFs */
@@ -569,14 +594,9 @@ ngx_http_aws_auth_canonical_request(ngx_http_request_t *r,
     p = ngx_copy(p, method.data, method.len);
     *p++ = LF;
 
-    if (escape == 0) {
-        p = ngx_copy(p, u->uri.data, u->uri.len);
-
-    } else {
-        p = (u_char *) ngx_escape_uri_components(p, u->uri.data, u->uri.len);
-    }
-
+    p = (u_char *) ngx_normalize_uri(p, u->uri.data, u->uri.len);
     *p++ = LF;
+
     *p++ = LF;  /* no query params */
 
     for (h = headers.elts; h < last; h++) {
@@ -607,7 +627,7 @@ ngx_http_aws_auth_generate_signing_key(ngx_http_request_t *r,
 
     /* get the GMT date */
     ngx_libc_gmtime(ngx_time(), &tm);
-    date.len = strftime((char*)date_buf, sizeof(date_buf), "%Y%m%d", &tm);
+    date.len = strftime((char *) date_buf, sizeof(date_buf), "%Y%m%d", &tm);
     if (date.len == 0) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "ngx_http_aws_auth_generate_signing_key: strftime failed");
@@ -693,7 +713,7 @@ ngx_http_aws_auth_variable(ngx_http_request_t *r, ngx_http_variable_value_t *v,
         "SignedHeaders=%V, "
         "Signature=%V";
 
-    ctx = (void*)data;
+    ctx = (void *) data;
 
     if (ctx->ignore) {
         v->not_found = 1;
@@ -951,7 +971,7 @@ ngx_http_aws_auth_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     /* parse the block */
     var->get_handler = ngx_http_aws_auth_variable;
-    var->data = (uintptr_t)ctx;
+    var->data = (uintptr_t) ctx;
 
     conf_ctx.cmds = ngx_http_aws_auth_block_commands;
     conf_ctx.cf = &save;
@@ -960,7 +980,7 @@ ngx_http_aws_auth_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     cf->ctx = &conf_ctx;
     cf->handler = ngx_http_aws_auth_command_handler;
-    cf->handler_conf = (void*)ctx;
+    cf->handler_conf = (void *) ctx;
 
     rv = ngx_conf_parse(cf, NULL);
 
