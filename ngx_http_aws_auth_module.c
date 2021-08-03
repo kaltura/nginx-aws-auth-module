@@ -282,7 +282,9 @@ ngx_http_aws_auth_get_signed_headers(ngx_http_request_t *r, ngx_buf_t *request,
     date->len = 0;
     content_sha->len = 0;
 
-    ngx_array_init(headers, r->pool, 5, sizeof(*h));
+    if (ngx_array_init(headers, r->pool, 5, sizeof(*h)) != NGX_OK) {
+        return NGX_ERROR;
+    }
 
     for (;;) {
         rc = ngx_http_parse_header_line(r, request, 1);
@@ -329,6 +331,9 @@ ngx_http_aws_auth_get_signed_headers(ngx_http_request_t *r, ngx_buf_t *request,
         }
 
         h = ngx_array_push(headers);
+        if (h == NULL) {
+            return NGX_ERROR;
+        }
 
         h->key.data = ngx_pnalloc(r->pool, key.len);
         h->key.len = key.len;
