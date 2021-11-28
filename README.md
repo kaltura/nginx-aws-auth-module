@@ -1,6 +1,6 @@
 # Nginx AWS Authentication module
 
-Generates the required headers for AWS V4 authentication.
+Generates the required headers/args for AWS V4 authentication.
 
 ## Build
 
@@ -30,16 +30,26 @@ http {
         region us-east-1;
     }
 
+    aws_auth_presign $aws_presigned $aws_token https://mybucket.s3.us-east-1.amazonaws.com/$key_name?X-Amz-Expires=600&X-Amz-Security-Token=$temp_token;
+
     server {
 
         ...
 
+        # proxy to s3 - sign using headers
         location /proxy/ {
-            proxy_pass http://mybucket.s3.eu-central-1.amazonaws.com/;
+            proxy_pass https://mybucket.s3.us-east-1.amazonaws.com/;
             proxy_set_header X-Amz-Date $aws_auth_date;
             proxy_set_header X-Amz-Content-SHA256                e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855; # no body
             proxy_set_header X-Amz-Security-Token 23HYTMLJluxQL...;
             proxy_set_header Authorization $aws_token;
+        }
+
+        # redirect to a presigned url - sign using args
+        set $temp_token 23HYTMLJluxQL...;  # MUST be uri encoded! (all chars except a-z A-Z 0-9 - . _ ~)
+
+        location ~ /redirect/(?P<key_name>.*) {
+            return 307 $aws_presigned;
         }
     }
 }
@@ -53,6 +63,15 @@ http {
 * **context**: `http`
 
 Creates a new variable that evaluates to the `Authorization` header for AWS authentication.
+
+#### aws_auth_presign
+* **syntax**: `aws_auth_presign $variable $aws_auth_var url_expr`
+* **default**: `none`
+* **context**: `http`
+
+Creates a new variable that adds the authorization args to the provided url expression.
+`$aws_auth_var` must point to a variable previously defined using the `aws_auth` directive.
+`url_expr` can contain variables (e.g. `$uri`).
 
 #### access_key
 * **syntax**: `access_key key`
