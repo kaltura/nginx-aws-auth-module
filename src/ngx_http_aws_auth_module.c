@@ -13,7 +13,7 @@
 #define AMZ_DATE_MAX_LEN            (sizeof("YYYYmmdd"))
 #define AMZ_DATE_TIME_MAX_LEN       (sizeof("YYYYmmddTHHMMSSZ"))
 
-#define PRESIGN_AMZ_ARGS            ("X-Amz-Algorithm=AWS4-HMAC-SHA256"     \
+#define PRESIGN_AMZ_ARGS            ("X-Amz-Algorithm=AWS4-HMAC-SHA256"      \
     "&X-Amz-SignedHeaders=host&X-Amz-Credential=")
 #define PRESIGN_AMZ_ARG_DATE        ("&X-Amz-Date=")
 #define PRESIGN_AMZ_ARG_SIG         ("&X-Amz-Signature=")
@@ -122,6 +122,7 @@ static ngx_http_module_t  ngx_http_aws_auth_module_ctx = {
     NULL,                                /* create location configuration */
     NULL                                 /* merge location configuration */
 };
+
 
 ngx_module_t ngx_http_aws_auth_module = {
     NGX_MODULE_V1,
@@ -233,6 +234,7 @@ ngx_http_aws_auth_hmac_sha256(ngx_http_request_t *r, ngx_str_t *key,
 
     return NGX_OK;
 }
+
 
 static ngx_int_t
 ngx_http_aws_auth_hmac_sha256_hex(ngx_http_request_t *r, ngx_str_t *key,
@@ -377,8 +379,8 @@ ngx_http_aws_auth_get_signed_headers(ngx_http_request_t *r, ngx_buf_t *request,
                 ngx_http_aws_auth_host.len) == 0)
         {
             required = 1;
-        }
-        else if (key.len > ngx_http_aws_auth_amz_prefix.len &&
+
+        } else if (key.len > ngx_http_aws_auth_amz_prefix.len &&
             ngx_strncasecmp(key.data, ngx_http_aws_auth_amz_prefix.data,
                 ngx_http_aws_auth_amz_prefix.len) == 0)
         {
@@ -471,6 +473,7 @@ ngx_normalize_uri(u_char *dst, u_char *src, size_t size)
             if (escape[*src >> 5] & (1U << (*src & 0x1f))) {
                 n++;
             }
+
             src++;
             size--;
         }
@@ -563,6 +566,7 @@ ngx_http_aws_auth_push_args(ngx_str_t *src, ngx_array_t *dst)
 
     return NGX_OK;
 }
+
 
 static u_char *
 ngx_http_aws_auth_sort_args(u_char *p, ngx_pool_t *pool,
@@ -660,6 +664,7 @@ ngx_http_aws_auth_canonical_request(ngx_http_request_t *r,
             "ngx_http_aws_auth_canonical_request: no space in request buf");
         return NGX_ERROR;
     }
+
     method.data = request->pos;
     method.len = pos - method.data;
 
@@ -677,11 +682,13 @@ ngx_http_aws_auth_canonical_request(ngx_http_request_t *r,
             "ngx_http_aws_auth_canonical_request: no LF in request buf");
         return NGX_ERROR;
     }
+
     request->pos++;
 
     /* get headers */
     if (ngx_http_aws_auth_get_signed_headers(r, request,
-        &headers, date, &content_sha) != NGX_OK) {
+        &headers, date, &content_sha) != NGX_OK)
+    {
         return NGX_ERROR;
     }
 
@@ -755,6 +762,7 @@ ngx_http_aws_auth_canonical_request(ngx_http_request_t *r,
         p = ngx_copy(p, h->value.data, h->value.len);
         *p++ = LF;
     }
+
     *p++ = LF;
     p = ngx_copy(p, signed_headers->data, signed_headers->len);
     *p++ = LF;
@@ -772,6 +780,7 @@ ngx_http_aws_auth_canonical_request(ngx_http_request_t *r,
 
     return NGX_OK;
 }
+
 
 static ngx_int_t
 ngx_http_aws_auth_generate_signing_key(ngx_http_request_t *r,
@@ -791,6 +800,7 @@ ngx_http_aws_auth_generate_signing_key(ngx_http_request_t *r,
             "ngx_http_aws_auth_generate_signing_key: strftime failed");
         return NGX_ERROR;
     }
+
     date.data = date_buf;
 
     /* check whether date changed since last time */
@@ -840,6 +850,7 @@ ngx_http_aws_auth_generate_signing_key(ngx_http_request_t *r,
 
     return NGX_OK;
 }
+
 
 static ngx_int_t
 ngx_http_aws_auth_sign(ngx_http_request_t *r, ngx_http_aws_auth_ctx_t *ctx,
@@ -894,6 +905,7 @@ ngx_http_aws_auth_sign(ngx_http_request_t *r, ngx_http_aws_auth_ctx_t *ctx,
     return ngx_http_aws_auth_hmac_sha256_hex(r, &ctx->signing_key,
         &string_to_sign, signature);
 }
+
 
 static ngx_int_t
 ngx_http_aws_auth_variable(ngx_http_request_t *r, ngx_http_variable_value_t *v,
@@ -1149,6 +1161,7 @@ ngx_http_aws_auth_presign_canonical(ngx_http_request_t *r,
     if (p == NULL) {
         return NGX_ERROR;
     }
+
     *p++ = LF;
 
     /* signed headers + payload */
@@ -1303,28 +1316,24 @@ ngx_http_aws_auth_command_handler(ngx_conf_t *cf, ngx_command_t *dummy,
                     goto invalid;
                 }
 
-            }
-            else if (cmd->type & NGX_CONF_1MORE) {
+            } else if (cmd->type & NGX_CONF_1MORE) {
 
                 if (cf->args->nelts < 2) {
                     goto invalid;
                 }
 
-            }
-            else if (cmd->type & NGX_CONF_2MORE) {
+            } else if (cmd->type & NGX_CONF_2MORE) {
 
                 if (cf->args->nelts < 3) {
                     goto invalid;
                 }
 
-            }
-            else if (cf->args->nelts > NGX_CONF_MAX_ARGS) {
+            } else if (cf->args->nelts > NGX_CONF_MAX_ARGS) {
 
                 goto invalid;
 
-            }
-            else if (!(cmd->type & argument_number[cf->args->nelts - 1]))
-            {
+            } else if (!(cmd->type & argument_number[cf->args->nelts - 1])) {
+
                 goto invalid;
             }
         }
@@ -1371,6 +1380,7 @@ ngx_http_aws_auth_init_ctx(ngx_conf_t *cf, ngx_http_aws_auth_ctx_t *ctx)
     if (ctx->secret_key_prefix.data == NULL) {
         return NGX_CONF_ERROR;
     }
+
     p = ctx->secret_key_prefix.data;
     p = ngx_copy(p, ngx_http_aws_auth_aws4.data, ngx_http_aws_auth_aws4.len);
     p = ngx_copy(p, ctx->secret_key.data, ctx->secret_key.len);
