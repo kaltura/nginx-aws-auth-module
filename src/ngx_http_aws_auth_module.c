@@ -189,12 +189,9 @@ static ngx_uint_t  argument_number[] = {
 static void
 ngx_http_aws_auth_sha256_hex(ngx_str_t *message, u_char *digest)
 {
-    u_char      hash[SHA256_DIGEST_LENGTH];
-    SHA256_CTX  sha256;
+    u_char  hash[SHA256_DIGEST_LENGTH];
 
-    SHA256_Init(&sha256);
-    SHA256_Update(&sha256, message->data, message->len);
-    SHA256_Final(hash, &sha256);
+    SHA256(message->data, message->len, hash);
 
     ngx_hex_dump(digest, hash, sizeof(hash));
 }
@@ -204,31 +201,15 @@ static ngx_int_t
 ngx_http_aws_auth_hmac_sha256(ngx_http_request_t *r, ngx_str_t *key,
     ngx_str_t *message, ngx_str_t *dest)
 {
-    unsigned   hash_len;
-#if (OPENSSL_VERSION_NUMBER < 0x10100000L)
-    HMAC_CTX   hmac_buf;
-#endif
-    HMAC_CTX  *hmac;
+    unsigned  hash_len;
 
-#if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
-    hmac = HMAC_CTX_new();
-    if (hmac == NULL) {
+    if (HMAC(EVP_sha256(), key->data, key->len, message->data, message->len,
+        dest->data, &hash_len) == NULL)
+    {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-            "ngx_http_aws_auth_hmac_sha256: HMAC_CTX_new failed");
+            "ngx_http_aws_auth_hmac_sha256: HMAC failed");
         return NGX_ERROR;
     }
-#else
-    hmac = &hmac_buf;
-    HMAC_CTX_init(hmac);
-#endif
-    HMAC_Init_ex(hmac, key->data, key->len, EVP_sha256(), NULL);
-    HMAC_Update(hmac, message->data, message->len);
-    HMAC_Final(hmac, dest->data, &hash_len);
-#if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
-    HMAC_CTX_free(hmac);
-#else
-    HMAC_CTX_cleanup(hmac);
-#endif
 
     dest->len = hash_len;
 
