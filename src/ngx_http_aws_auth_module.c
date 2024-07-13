@@ -606,6 +606,19 @@ ngx_http_aws_auth_sort_args(u_char *p, ngx_pool_t *pool,
 
 
 static ngx_int_t
+ngx_http_aws_auth_chain_empty(ngx_chain_t *cl)
+{
+    for ( ; cl != NULL; cl = cl->next) {
+        if (ngx_buf_size(cl->buf) != 0) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+
+static ngx_int_t
 ngx_http_aws_auth_canonical_request(ngx_http_request_t *r,
     ngx_http_aws_auth_ctx_t *ctx, ngx_str_t *signed_headers, ngx_str_t *date,
     ngx_str_t *result)
@@ -648,7 +661,7 @@ ngx_http_aws_auth_canonical_request(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    if (u->request_bufs->next != NULL) {
+    if (!ngx_http_aws_auth_chain_empty(u->request_bufs->next)) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "ngx_http_aws_auth_canonical_request: more than one request buf");
         return NGX_ERROR;
